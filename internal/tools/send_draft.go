@@ -89,7 +89,8 @@ func registerSendDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 			return mcp.NewToolResultError(fmt.Sprintf("get password: %v", err)), nil
 		}
 
-		msg, err := smtpsender.SendRaw(acc, password, recipients, rawMsg)
+		// Draft-only headers (Apple Mail draft markers) must not go out.
+		msg, err := smtpsender.SendRaw(acc, password, recipients, smtpsender.StripDraftHeaders(rawMsg))
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("send failed: %v", err)), nil
 		}

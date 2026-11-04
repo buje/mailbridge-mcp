@@ -63,6 +63,10 @@ fait la conversion et extrait les liens actionnables (`mailto:`, `tel:`, URLs).
 que si `send: true`. Le dossier Brouillons est auto-détecté (`FindDraftsMailbox`). Chaque appel d'outil est
 borné à 150 s (`internal/tools/timeout.go`) : au-delà, la connexion IMAP du compte est coupée.
 
+Les brouillons (`save_draft`, `reply_email`) portent les en-têtes de brouillon d'Apple Mail
+(`X-Uniform-Type-Identifier: com.apple.mail-draft` + UUID, `internal/smtp/draft.go`) : sans eux, Mail
+envoie une copie et laisse l'original dans Brouillons. `send_draft` les retire avant l'envoi.
+
 ## Signature
 
 Config par compte (`signature` dans `accounts.json`, voir `docs/signature.md`). Résolue dans

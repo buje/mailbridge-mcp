@@ -93,7 +93,7 @@ func registerSaveDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 			}
 		}
 
-		if err := imappool.AppendMessage(client, draftsMailbox, []goimap.Flag{goimap.FlagDraft}, msg); err != nil {
+		if err := imappool.AppendMessage(client, draftsMailbox, []goimap.Flag{goimap.FlagDraft}, smtpsender.MarkDraft(msg)); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("save draft failed: %v", err)), nil
 		}
 

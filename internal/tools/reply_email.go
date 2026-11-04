@@ -147,7 +147,7 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 					return mcp.NewToolResultError(fmt.Sprintf("%v (pass drafts_mailbox explicitly)", err)), nil
 				}
 			}
-			if err := imappool.AppendMessage(client, draftsMailbox, []goimap.Flag{goimap.FlagDraft, goimap.FlagSeen}, msg); err != nil {
+			if err := imappool.AppendMessage(client, draftsMailbox, []goimap.Flag{goimap.FlagDraft, goimap.FlagSeen}, smtpsender.MarkDraft(msg)); err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("save reply draft failed: %v", err)), nil
 			}
 			return mcp.NewToolResultText(fmt.Sprintf("Reply saved as draft in %s (NOT sent) → %s. Review it, then send with send_draft.%s", draftsMailbox, recipients, describeSignature(sig))), nil
