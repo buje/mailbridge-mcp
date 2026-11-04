@@ -190,26 +190,72 @@ func findSpecialMailbox(c *imapclient.Client, attr goimap.MailboxAttr, names ...
 		}
 	}
 
+	// Candidates: folders flagged with the special-use attribute, and folders
+	// whose last path component is a known name. Several can exist, e.g. on
+	// OVH another client created "INBOX.INBOX.Drafts" (flagged \Drafts by the
+	// server) while Apple Mail uses "INBOX.Drafts".
+	var cands []mailboxCandidate
 	for _, mb := range mailboxes {
+		special := false
 		for _, a := range mb.Attrs {
 			if a == attr {
-				return mb.Mailbox, nil
+				special = true
 			}
 		}
-	}
-
-	// Fallback: match by last path component
-	for _, mb := range mailboxes {
-		parts := strings.Split(mb.Mailbox, string(mb.Delim))
+		parts := []string{mb.Mailbox}
+		if mb.Delim != 0 {
+			parts = strings.Split(mb.Mailbox, string(mb.Delim))
+		}
 		last := strings.ToLower(parts[len(parts)-1])
-		for _, name := range names {
+		rank := len(names)
+		for i, name := range names {
 			if last == name {
-				return mb.Mailbox, nil
+				rank = i
+				break
 			}
 		}
+		if special || rank < len(names) {
+			cands = append(cands, mailboxCandidate{name: mb.Mailbox, depth: len(parts), special: special, nameRank: rank})
+		}
 	}
+	if len(cands) == 0 {
+		return "", fmt.Errorf("no %s mailbox found", strings.TrimPrefix(string(attr), "\\"))
+	}
+	return pickMailbox(cands), nil
+}
 
-	return "", fmt.Errorf("no %s mailbox found", strings.TrimPrefix(string(attr), "\\"))
+type mailboxCandidate struct {
+	name     string
+	depth    int  // number of path components ("INBOX.Drafts" = 2)
+	special  bool // flagged with the special-use attribute
+	nameRank int  // position of the name in the known names list (len(names) if none)
+}
+
+// pickMailbox chooses among several candidate folders: the least nested one
+// (a duplicate such as "INBOX.INBOX.Drafts" is created by a misconfigured
+// client), then the special-use one, then the most usual name. Message counts
+// are not a reliable signal: drafts disappear once sent or deleted.
+func pickMailbox(cands []mailboxCandidate) string {
+	best := cands[0]
+	for _, c := range cands[1:] {
+		switch {
+		case c.depth != best.depth:
+			if c.depth < best.depth {
+				best = c
+			}
+		case c.special != best.special:
+			if c.special {
+				best = c
+			}
+		case c.nameRank != best.nameRank:
+			if c.nameRank < best.nameRank {
+				best = c
+			}
+		case c.name < best.name:
+			best = c
+		}
+	}
+	return best.name
 }
 
 // MailboxStatusInfo holds status information about a mailbox.
