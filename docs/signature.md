@@ -29,6 +29,48 @@ Dans `~/.config/mailbridge/accounts.json`, sur le compte :
 
 `mailbridge-mcp setup` conserve la signature d'un compte existant.
 
+## Importer depuis Apple Mail
+
+Plutôt que d'écrire le HTML à la main, la signature peut être reprise de
+l'app Mail :
+
+```bash
+mailbridge-mcp signature            # choix du compte dans une liste
+mailbridge-mcp signature pro        # ou ID du compte
+```
+
+`mailbridge-mcp setup` propose aussi l'import à l'ajout d'un compte.
+
+- Les signatures sont lues dans le dossier actif de Mail
+  (`~/Library/Mail/V*/MailData/Signatures`). La version la plus récente est
+  prise, et les copies iCloud ou du conteneur Mail, parfois périmées, sont
+  ignorées.
+- `AllSignatures.plist` donne les signatures existantes : les fichiers laissés
+  par des signatures supprimées dans Mail ne sont pas proposés.
+- `AccountsMap.plist` indique la signature que Mail utilise pour chaque
+  adresse : elle est présélectionnée (`<- used by … in Mail`), on valide avec
+  Entrée. À défaut, l'outil suggère celle qui contient l'adresse ou son domaine.
+- La signature choisie est convertie dans le format ci-dessus :
+  `signatures/<compte>.html`, et chaque image embarquée enregistrée sous
+  `signatures/<compte>-sig<n>.png`, déclarée dans `images` (`cid` `sig1`,
+  `sig2`…). Les balises Apple `<object type="application/x-apple-msg-attachment">`
+  deviennent des `<img>`. Les images hébergées en ligne (`https://…`) restent
+  des liens. Les images refusées par le chargeur (autre format que PNG, JPEG
+  ou GIF, plus de 1 Mo) sont retirées du HTML pour que l'envoi n'échoue pas.
+- L'import est ponctuel : le serveur ne lit jamais `~/Library`. Pour reprendre
+  une signature modifiée dans Mail, relancer la commande.
+
+macOS protège les données de Mail application par application : la commande
+lit directement le dossier `Signatures` (lister `~/Library/Mail` est
+interdit). Si l'accès est refusé, la lancer depuis une app autorisée (Terminal)
+ou autoriser l'app courante dans *Réglages Système › Confidentialité et
+sécurité › Accès complet au disque*. Ce n'est utile que pour l'import.
+
+Pour créer une signature compatible Apple Mail, Gmail et Outlook :
+[générateur de signature email gratuit de Senzu Tech](https://senzu.tech/tools/signature-email-generator/)
+(modèles email-safe, images hébergées, réseaux sociaux, bouton d'action). On
+l'ajoute dans Mail, puis on lance `mailbridge-mcp signature`.
+
 ## Par message
 
 | Paramètre | Effet |

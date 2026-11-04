@@ -9,7 +9,7 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 - **Drafts** — save drafts and send them later
 - **Folders** — create, rename, and delete mailbox folders
 - **SMTP** — send new emails and reply to existing ones with proper threading headers
-- **Signature** — per-account text + HTML signature with CID-embedded images, added before the quoted original (see [docs/signature.md](docs/signature.md))
+- **Signature** — per-account text + HTML signature with CID-embedded images, added before the quoted original (see [docs/signature.md](docs/signature.md)); import it from Apple Mail with `mailbridge-mcp signature`
 - **macOS Keychain** — passwords are stored securely, never in config files
 - **MCP stdio** — runs as a subprocess launched by Claude Desktop
 
@@ -64,7 +64,16 @@ The config file is automatically created at `~/.config/mailbridge/accounts.json`
 
 Run `setup` again to add more accounts — existing accounts with the same ID are updated in place.
 
-### 2. Configure Claude Desktop
+### 2. Import your email signature (optional)
+
+```bash
+./mailbridge-mcp signature            # pick the account from a list
+./mailbridge-mcp signature work       # or pass the account ID
+```
+
+Lists the Apple Mail signatures and pre-selects the one Mail uses for that address. See [docs/signature.md](docs/signature.md). Need one? Try the free [email signature generator by Senzu Tech](https://senzu.tech/tools/signature-email-generator/).
+
+### 3. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -79,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### 3. Restart Claude Desktop
+### 4. Restart Claude Desktop
 
 The email tools will be available immediately.
 
