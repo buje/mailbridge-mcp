@@ -10,6 +10,7 @@ make install      # Build + copy to /usr/local/bin + codesign (required for Clau
 make clean        # Remove local binary
 ./mailbridge-mcp setup   # Interactive config: add/update an account
 ./mailbridge-mcp serve   # Start MCP stdio server (used by Claude/Cursor)
+./mailbridge-mcp signature [account_id]   # Import an account signature from Apple Mail (internal/applemail)
 ```
 
 **Critical:** After any code change, run `make install` — Claude Code loads the binary from `/usr/local/bin/mailbridge-mcp`, not from the repo. The Makefile also runs `codesign --force --sign -` on the installed binary (required on macOS to avoid Gatekeeper prompts).
