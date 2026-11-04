@@ -35,6 +35,9 @@ type InlineImage struct {
 type Quote struct {
 	Header string // attribution line, e.g. "On <date>, <from> wrote:"
 	Text   string
+	// HTML is the original HTML body, quoted as is in the HTML version so
+	// its layout (signature, tables, links) survives. Text is used when empty.
+	HTML string
 }
 
 // Body is the content of a message: the text written by the user, then the
@@ -90,9 +93,15 @@ func (b Body) HTML(cids map[string]string) string {
 			htmlTextStyle, rewriteCIDs(signatureFragment(s.HTML), cids))
 	}
 	if q := b.Quote; q != nil {
-		fmt.Fprintf(&sb, "<br>\n<div class=\"gmail_quote\" style=\"%s\">%s<br>\n", htmlTextStyle, html.EscapeString(q.Header))
-		fmt.Fprintf(&sb, "<blockquote type=\"cite\" class=\"gmail_quote\" style=\"%s\">%s</blockquote>\n</div>\n",
-			htmlQuoteStyle, textToHTML(q.Text))
+		// The blockquote is outside the styled div: a quoted HTML message
+		// keeps its own font sizes and spacing instead of inheriting ours.
+		content := textToHTML(q.Text)
+		if frag := quoteFragment(q.HTML); frag != "" {
+			content = frag
+		}
+		fmt.Fprintf(&sb, "<br>\n<div class=\"gmail_quote\">\n<div style=\"%s\">%s</div>\n", htmlTextStyle, html.EscapeString(q.Header))
+		fmt.Fprintf(&sb, "<blockquote type=\"cite\" class=\"gmail_quote\" style=\"%s\">\n%s\n</blockquote>\n</div>\n",
+			htmlQuoteStyle, content)
 	}
 	sb.WriteString("</body></html>\n")
 	return sb.String()
@@ -102,6 +111,35 @@ func (b Body) HTML(cids map[string]string) string {
 func textToHTML(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.ReplaceAll(html.EscapeString(s), "\n", "<br>\n")
+}
+
+var (
+	reHTMLScript = regexp.MustCompile(`(?is)<script\b.*?</\s*script\s*>`)
+	reCIDImage   = regexp.MustCompile(`(?is)<img\b[^>]*\bsrc\s*=\s*["']?cid:[^>]*>`)
+	reQuoteBody  = regexp.MustCompile(`(?is)<body[^>]*>(.*?)</\s*body\s*>`)
+)
+
+// quoteFragment prepares the original HTML body for the quote: the content of
+// each <body> (Apple Mail may split a message in several HTML parts), without
+// scripts, and without the cid: images of the original message, which are
+// not attached to the reply and would show as broken images.
+func quoteFragment(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	var frag string
+	if ms := reQuoteBody.FindAllStringSubmatch(s, -1); ms != nil {
+		parts := make([]string, 0, len(ms))
+		for _, m := range ms {
+			parts = append(parts, strings.TrimSpace(m[1]))
+		}
+		frag = strings.Join(parts, "\n")
+	} else {
+		frag = reHTMLHead.ReplaceAllString(s, "")
+	}
+	frag = reHTMLScript.ReplaceAllString(frag, "")
+	frag = reCIDImage.ReplaceAllString(frag, "")
+	return strings.TrimSpace(frag)
 }
 
 // signatureFragment keeps the inner content of a full HTML document, so a
@@ -155,7 +193,7 @@ func newBoundary() string {
 //
 //	multipart/mixed                (only with attachments)
 //	├─ multipart/related           (only with inline images)
-//	│  ├─ multipart/alternative    (only with an HTML signature)
+//	│  ├─ multipart/alternative    (with an HTML signature or quote)
 //	│  │  ├─ text/plain
 //	│  │  └─ text/html
 //	│  └─ image/* (Content-ID, inline)
@@ -180,18 +218,24 @@ func writeBody(msg *strings.Builder, b Body, from string, attachments []Attachme
 // alternatives, wrapped with the inline images they reference.
 func writeContent(msg *strings.Builder, b Body, from string) {
 	sig := b.Signature
-	if sig == nil || strings.TrimSpace(sig.HTML) == "" {
+	sigHTML := sig != nil && strings.TrimSpace(sig.HTML) != ""
+	quoteHTML := b.Quote != nil && quoteFragment(b.Quote.HTML) != ""
+	if !sigHTML && !quoteHTML {
 		writeTextPart(msg, "text/plain", b.Plain())
 		return
 	}
 
 	referenced := map[string]bool{}
-	for _, name := range ReferencedCIDs(sig.HTML) {
-		referenced[name] = true
-	}
 	cids := map[string]string{}
 	var images []InlineImage
-	for _, img := range sig.Images {
+	var sigImages []InlineImage
+	if sigHTML {
+		for _, name := range ReferencedCIDs(sig.HTML) {
+			referenced[name] = true
+		}
+		sigImages = sig.Images
+	}
+	for _, img := range sigImages {
 		if referenced[img.Name] && cids[img.Name] == "" {
 			cids[img.Name] = newContentID(img.Name, from)
 			images = append(images, img)

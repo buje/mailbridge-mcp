@@ -128,3 +128,29 @@ func TestParseBodyFormats(t *testing.T) {
 		t.Errorf("format both incomplet:\n%s", p.Body)
 	}
 }
+
+const alternativeMail = "From: a@x.fr\r\nSubject: T\r\nMIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/alternative; boundary=\"b1\"\r\n\r\n" +
+	"--b1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBonjour texte\r\n" +
+	"--b1\r\nContent-Type: multipart/related; boundary=\"b2\"\r\n\r\n" +
+	"--b2\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Bonjour html</p></body></html>\r\n" +
+	"--b2\r\nContent-Type: image/png\r\nContent-ID: <logo>\r\n\r\nPNG\r\n--b2--\r\n" +
+	"--b1--\r\n"
+
+func TestParseBodyAlternativeNotDuplicated(t *testing.T) {
+	p := &ParsedEmail{}
+	p.parseBody([]byte(alternativeMail), 0, BodyFormatAuto)
+	if p.TextBody != "Bonjour texte" {
+		t.Errorf("text body = %q, want only the text/plain alternative", p.TextBody)
+	}
+	if !strings.Contains(p.HTMLBody, "<p>Bonjour html</p>") {
+		t.Errorf("html body = %q", p.HTMLBody)
+	}
+
+	htmlOnly := strings.Replace(alternativeMail, "--b1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBonjour texte\r\n", "", 1)
+	p = &ParsedEmail{}
+	p.parseBody([]byte(htmlOnly), 0, BodyFormatAuto)
+	if !strings.Contains(p.TextBody, "Bonjour html") {
+		t.Errorf("text from html = %q", p.TextBody)
+	}
+}
