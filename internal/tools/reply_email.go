@@ -78,45 +78,8 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError(fmt.Sprintf("fetch original email failed: %v", err)), nil
 		}
 
-		// Build recipients
-		to := []string{original.From}
-		var cc []string
-		if replyAll {
-			for _, addr := range original.To {
-				if !isSameEmail(addr, acc.Email) {
-					cc = append(cc, addr)
-				}
-			}
-			for _, addr := range original.Cc {
-				if !isSameEmail(addr, acc.Email) {
-					cc = append(cc, addr)
-				}
-			}
-		}
-
-		// Build threading headers (RFC 2822 §3.6.4):
-		//   In-Reply-To: <parent-id>
-		//   References:  <ref-1> <ref-2> ... <parent-id>
-		parentID := ensureAngleBrackets(original.MessageID)
-		var refs []string
-		for _, id := range original.References {
-			refs = append(refs, ensureAngleBrackets(id))
-		}
-		if parentID != "" {
-			refs = append(refs, parentID)
-		}
-		references := strings.Join(refs, " ")
-		inReplyTo := parentID
-		subject := original.Subject
-
-		// Quote original body
-		var quotedBody strings.Builder
-		quotedBody.WriteString(body)
-		quotedBody.WriteString("\n\n")
-		quotedBody.WriteString(fmt.Sprintf("On %s, %s wrote:\n", original.Date, original.From))
-		for _, line := range strings.Split(original.Body, "\n") {
-			quotedBody.WriteString("> " + line + "\n")
-		}
+		// Recipients, threading headers and quoted original (shared with reply_draft).
+		parts := buildReplyParts(acc, original, body, replyAll)
 
 		password, err := auth.GetPassword(acc.Auth)
 		if err != nil {
@@ -128,7 +91,7 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError(fmt.Sprintf("invalid attachments: %v", err)), nil
 		}
 
-		msg, err := smtpsender.SendReply(acc, password, to, cc, subject, quotedBody.String(), inReplyTo, references, attachments)
+		msg, err := smtpsender.SendReply(acc, password, parts.to, parts.cc, parts.subject, parts.text, parts.inReplyTo, parts.references, attachments)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("reply failed: %v", err)), nil
 		}

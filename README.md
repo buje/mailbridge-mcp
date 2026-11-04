@@ -6,7 +6,7 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 
 - **Multi-account** — manage multiple email accounts from a single server
 - **IMAP** — list mailboxes, search, read, download attachments, move, copy, delete, and flag emails
-- **Drafts** — save drafts and send them later
+- **Drafts** — save drafts, prepare replies as drafts (threaded, with the quoted history), and send them later
 - **Folders** — create, rename, and delete mailbox folders
 - **SMTP** — send new emails and reply to existing ones with proper threading headers
 - **macOS Keychain** — passwords are stored securely, never in config files
@@ -24,6 +24,7 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 | `save_attachment` | Download an attachment to a local directory |
 | `send_email` | Send a new email |
 | `reply_email` | Reply to an email (with proper In-Reply-To/References) |
+| `reply_draft` | Prepare a reply as a draft instead of sending it (same threading and quoting as `reply_email`) |
 | `save_draft` | Save a draft email to the Drafts folder |
 | `send_draft` | Send a draft email by UID |
 | `move_email` | Move an email to another folder |
@@ -33,6 +34,16 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 | `create_mailbox` | Create a new mailbox folder |
 | `rename_mailbox` | Rename a mailbox folder |
 | `delete_mailbox` | Delete an empty mailbox folder |
+
+## Reply drafts
+
+`reply_draft` works like `reply_email` but saves the reply in the Drafts folder instead of sending it, so it can be reviewed (and edited) in any mail client before sending:
+
+- **Threaded**: `In-Reply-To` / `References` point to the original message, so mail clients group the draft with the conversation.
+- **Subject**: prefixed with `Re:` when needed.
+- **History**: the original message is quoted below the reply.
+- **Reply all**: `reply_all: true` copies the original To/Cc recipients, except your own address.
+- **Drafts folder**: detected through the IMAP `\Drafts` special-use attribute (RFC 6154), with a fallback on common names (`Drafts`, `Brouillons`). Override with `drafts_mailbox`.
 
 ## Installation
 

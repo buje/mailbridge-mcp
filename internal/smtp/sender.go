@@ -215,7 +215,9 @@ func buildSimpleBody(msg *strings.Builder, body string) {
 // part followed by base64-encoded attachment parts.
 func buildMultipartMixed(msg *strings.Builder, body string, attachments []Attachment) {
 	boundary := fmt.Sprintf("==boundary_%s_%d", hex.EncodeToString(randomBytes(12)), time.Now().UnixNano())
-	fmt.Fprintf(msg, "Content-Type: multipart/mixed; boundary=%s\r\n", boundary)
+	// The boundary starts with "=", a MIME tspecial: it must be quoted
+	// (RFC 2045 §5.1), otherwise strict parsers reject the whole message.
+	fmt.Fprintf(msg, "Content-Type: multipart/mixed; boundary=\"%s\"\r\n", boundary)
 	fmt.Fprintf(msg, "\r\n")
 
 	// First part: text body

@@ -107,10 +107,10 @@ Key conventions:
 - Tools that send email (send_email, reply_email, send_draft) also copy the sent message to the Sent folder via `imappool.FindSentMailbox()` + `imappool.AppendMessage()`
 - Error messages include the operation name, UID, mailbox, or account for debugging
 
-## Complete Tool List (17 tools)
+## Complete Tool List (18 tools)
 
 **Read (6):** `list_accounts`, `list_mailboxes`, `search_emails`, `read_email`, `save_attachment` (downloads an attachment to disk), `mailbox_status`
-**Write — email (4):** `send_email`, `reply_email`, `save_draft`, `send_draft`
+**Write — email (5):** `send_email`, `reply_email`, `reply_draft` (saves a threaded reply to Drafts instead of sending), `save_draft`, `send_draft`
 **Write — mailbox (4):** `move_email`, `copy_email`, `mark_email`, `delete_email`
 **Write — folder (3):** `create_mailbox`, `rename_mailbox`, `delete_mailbox`
 
@@ -146,6 +146,7 @@ Shared helper: `splitAndTrim()` in `send_email.go` — splits comma-separated st
 - `MarkEmail()`: `read`/`unread`/`flag`/`unflag` actions via STORE flags (silent)
 - `DeleteEmail()`: STORE +Deleted → UID EXPUNGE (permanent, two-step)
 - `FindSentMailbox()`: RFC 6154 SPECIAL-USE `\Sent` attribute first, then fallback to path component matching "sent" or "sent messages" (case-insensitive)
+- `FindDraftsMailbox()`: same strategy with `\Drafts`, falling back to "drafts", "draft" or "brouillons"
 - `MailboxStatus()`: only requests `NumMessages`/`NumUnseen` — explicitly avoids `NumDeleted` because many servers (OVH, Dovecot) return BAD for it
 
 ### Pool (`client.go`)
@@ -163,8 +164,11 @@ Shared helper: `splitAndTrim()` in `send_email.go` — splits comma-separated st
 - Auth: PLAIN auth with `smtp.PlainAuth`
 - Header folding: `foldHeader()` wraps long headers (like References) to ≤78 chars per RFC 5322 §2.2.3
 - Header sanitization: `sanitizeHeaderValue()` strips CR/LF to prevent header injection
+- Multipart boundaries start with `=` (a MIME tspecial) and are therefore always quoted in `Content-Type`
 
-## Threading/Reply (`reply_email.go`)
+## Threading/Reply (`reply_common.go`, `reply_email.go`, `reply_draft.go`)
+
+- `buildReplyParts()` (`reply_common.go`): recipients, threading headers, `Re:` subject and quoted body, shared by `reply_email` (sends via `SendReply()`) and `reply_draft` (`BuildMessage()` + `AppendMessage()` to the Drafts folder with `\Draft`)
 
 - `ensureAngleBrackets()`: normalizes Message-IDs to `<id@host>` form (IMAP servers return them with or without brackets)
 - References chain: `References = original.References + " " + original.MessageID` (RFC 2822 §3.6.4)
@@ -175,7 +179,7 @@ Shared helper: `splitAndTrim()` in `send_email.go` — splits comma-separated st
 ## Gotchas
 
 - **SMTP addresses:** IMAP can return display names like `'Edouard' <edouard@squirrel.fr>`. `extractEmail()` in `internal/smtp/sender.go` strips these before `RCPT TO`. Always use it when passing addresses to SMTP.
-- **Thin test coverage:** only `internal/imap/fetch_test.go` and `internal/imap/attachment_test.go` exist (MIME walk, HTML→text, link extraction, body formats, attachment extraction/saving). Everything else is untested — `go test ./...` passing says little.
+- **Thin test coverage:** only `internal/imap/fetch_test.go`, `internal/imap/attachment_test.go`, `internal/smtp/sender_test.go` and `internal/tools/reply_common_test.go` exist (MIME walk, HTML→text, link extraction, body formats, attachment extraction/saving, multipart boundaries, reply threading). Everything else is untested — `go test ./...` passing says little.
 - **macOS-only:** Keychain auth via `go-keyring` — won't work on Linux without D-Bus/Secret Service. `env` auth type is available as alternative.
 - **Config path:** `~/.config/mailbridge/accounts.json` (JSON, not YAML). When in doubt, trust `config.go:73` over any doc.
 - **IMAP pool:** Connections are pooled lazily. Must call `defer pool.Close()` after `NewPool()`.

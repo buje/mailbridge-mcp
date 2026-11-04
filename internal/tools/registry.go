@@ -19,6 +19,7 @@ func RegisterAll(s *server.MCPServer, cfg *config.Config, pool *imappool.Pool) {
 	// Write operations - email
 	registerSendEmail(s, cfg, pool)
 	registerReplyEmail(s, cfg, pool)
+	registerReplyDraft(s, cfg, pool)
 	registerSaveDraft(s, cfg, pool)
 	registerSendDraft(s, cfg, pool)
 

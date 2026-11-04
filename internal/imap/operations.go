@@ -202,6 +202,41 @@ func FindSentMailbox(c *imapclient.Client) (string, error) {
 	return "", fmt.Errorf("no Sent mailbox found")
 }
 
+// FindDraftsMailbox detects the Drafts folder for the account. It first checks
+// for the \Drafts special-use attribute (RFC 6154), then falls back to common names.
+func FindDraftsMailbox(c *imapclient.Client) (string, error) {
+	mailboxes, err := c.List("", "*", &goimap.ListOptions{
+		ReturnSpecialUse: true,
+	}).Collect()
+	if err != nil {
+		// Fallback if SPECIAL-USE not supported
+		mailboxes, err = c.List("", "*", nil).Collect()
+		if err != nil {
+			return "", fmt.Errorf("IMAP list: %w", err)
+		}
+	}
+
+	// Check for \Drafts attribute
+	for _, mb := range mailboxes {
+		for _, attr := range mb.Attrs {
+			if attr == goimap.MailboxAttrDrafts {
+				return mb.Mailbox, nil
+			}
+		}
+	}
+
+	// Fallback: match by last path component
+	for _, mb := range mailboxes {
+		parts := strings.Split(mb.Mailbox, string(mb.Delim))
+		last := strings.ToLower(parts[len(parts)-1])
+		if last == "drafts" || last == "draft" || last == "brouillons" {
+			return mb.Mailbox, nil
+		}
+	}
+
+	return "", fmt.Errorf("no Drafts mailbox found")
+}
+
 // MailboxStatusInfo holds status information about a mailbox.
 type MailboxStatusInfo struct {
 	Mailbox  string
