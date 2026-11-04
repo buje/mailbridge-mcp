@@ -18,6 +18,13 @@ var (
 	reBlankLines  = regexp.MustCompile(`\n{3,}`)
 )
 
+// HTMLToText converts an HTML fragment to readable plain text. It is the
+// exported entry point used by other packages (e.g. signature rendering);
+// the behaviour mirrors the internal htmlToText used when rendering emails.
+func HTMLToText(s string) string {
+	return htmlToText(s)
+}
+
 // htmlToText converts an HTML body to readable plain text while keeping the
 // line structure: block-level tags become newlines, links keep their URL.
 func htmlToText(s string) string {

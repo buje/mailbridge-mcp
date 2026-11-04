@@ -9,6 +9,7 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 - **Drafts** — save drafts, prepare replies as drafts (threaded, with the quoted history), and send them later
 - **Folders** — create, rename, and delete mailbox folders
 - **SMTP** — send new emails and reply to existing ones with proper threading headers
+- **Signatures** — reuse your Apple Mail signature (HTML, images, links) on sent emails, replies and drafts
 - **macOS Keychain** — passwords are stored securely, never in config files
 - **MCP stdio** — runs as a subprocess launched by Claude Desktop
 
@@ -34,6 +35,8 @@ MCP server for multi-account IMAP/SMTP email access, designed for Claude Desktop
 | `create_mailbox` | Create a new mailbox folder |
 | `rename_mailbox` | Rename a mailbox folder |
 | `delete_mailbox` | Delete an empty mailbox folder |
+
+`send_email`, `reply_email`, `reply_draft` and `save_draft` accept `include_signature` (default `true`) to append the account signature, see [Email signature](#email-signature).
 
 ## Reply drafts
 
@@ -74,7 +77,18 @@ The config file is automatically created at `~/.config/mailbridge/accounts.json`
 
 Run `setup` again to add more accounts — existing accounts with the same ID are updated in place.
 
-### 2. Configure Claude Desktop
+### 2. Add your email signature (optional)
+
+`setup` offers to import a signature from the Mail app. For an account that is already configured, run:
+
+```bash
+./mailbridge-mcp signature            # pick the account from a list
+./mailbridge-mcp signature work       # or pass the account ID
+```
+
+The command lists the signatures of Mail and pre-selects the one Mail uses for that address. Press Enter to confirm. See [Email signature](#email-signature) for details.
+
+### 3. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -89,7 +103,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### 3. Restart Claude Desktop
+### 4. Restart Claude Desktop
 
 The email tools will be available immediately.
 
@@ -118,6 +132,9 @@ The config file at `~/.config/mailbridge/accounts.json` is managed by the `setup
         "type": "keychain",
         "keychain_service": "mailbridge-mcp",
         "keychain_account": "user@example.com"
+      },
+      "signature": {
+        "file": "signatures/work.mailsignature"
       }
     }
   ],
@@ -128,6 +145,38 @@ The config file at `~/.config/mailbridge/accounts.json` is managed by the `setup
   }
 }
 ```
+
+## Email signature
+
+mailbridge appends your usual email signature to the messages it sends or saves as drafts, with its HTML layout, images and links.
+
+**How it works**
+
+- The signature is imported **once**, from the Mail app, when the account is added (`setup`) or later with `mailbridge-mcp signature <account_id>`.
+- It is copied to `~/.config/mailbridge/signatures/<account_id>.mailsignature` and referenced by `signature.file` in `accounts.json`. The server then only reads this copy: it never accesses `~/Library` at runtime and keeps working on its own, even without Mail.
+- To pick up a signature you changed in Mail, run `mailbridge-mcp signature <account_id>` again.
+
+**Picking the right signature**
+
+- mailbridge reads Mail's own data folder (`~/Library/Mail/V*/MailData/Signatures`) and its index (`AllSignatures.plist`), so signatures deleted in Mail are ignored.
+- `AccountsMap.plist` tells which signature Mail uses for each address: that one is pre-selected (`<- used by you@example.com in Mail`). Otherwise the signature mentioning the address or its domain is suggested.
+- iCloud copies of the signatures are only used when Mail's local folder does not exist, as they can be outdated.
+
+**Rendering**
+
+- With a signature, messages are sent as `multipart/alternative` (plain text + HTML). Images embedded in the signature are attached inline (`multipart/related`, `cid:`), and remote images (`https://…`) are kept as links.
+- Apple Mail's internal image tags (`<object type="application/x-apple-msg-attachment">`) are converted to standard `<img>` tags so that Gmail and Outlook display them.
+- In replies, the signature goes between your text and the quoted message, as in Mail.
+
+**macOS privacy**
+
+macOS protects Mail's data per application. The `signature` command only needs to read the `Signatures` folder, once. If access is denied, run the command from an app allowed to read it (e.g. Terminal), or allow the current app in **System Settings › Privacy & Security › Full Disk Access**. No permission is needed afterwards.
+
+**Need a signature?**
+
+Create one in a couple of minutes with the free [email signature generator by Senzu Tech](https://senzu.tech/tools/signature-email-generator/): email-safe templates for Apple Mail, Gmail, Outlook and Thunderbird, hosted images, social links and a call-to-action button, no sign-up. Add it to Mail, then run `mailbridge-mcp signature`.
+
+> Tip: if you paste raw HTML into a `.mailsignature` file to keep a custom layout, lock it with `chflags uchg <file>` so that Mail does not rewrite it.
 
 ## Security
 
@@ -140,7 +189,7 @@ The config file at `~/.config/mailbridge/accounts.json` is managed by the `setup
 
 - [mcp-go](https://github.com/mark3labs/mcp-go) — MCP server framework
 - [go-imap/v2](https://github.com/emersion/go-imap) — IMAP client
-- [go-message](https://github.com/emersion/go-message) — MIME parsing
+- [go-message](https://github.com/emersion/go-message) — MIME parsing (emails and Apple Mail signatures)
 - [go-keyring](https://github.com/zalando/go-keyring) — macOS Keychain access
 
 ## License

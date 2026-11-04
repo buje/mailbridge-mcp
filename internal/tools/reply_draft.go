@@ -12,11 +12,11 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-// registerReplyDraft adds a tool that prepares a reply as a draft (stored in
-// the Drafts folder, threaded and quoting the original) instead of sending it.
+// registerReplyDraft adds a tool that prepares a reply as a draft (kept in the
+// Drafts folder, threaded and quoting the original) instead of sending it.
 func registerReplyDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.Pool) {
 	tool := mcp.NewTool("reply_draft",
-		mcp.WithDescription("Save a reply as a draft (does NOT send). Keeps the conversation thread (In-Reply-To/References), prefixes the subject with 'Re:' and quotes the original message. The draft appears in the Drafts folder, ready to review and send."),
+		mcp.WithDescription("Save a reply as a draft (does NOT send). Keeps the conversation thread (In-Reply-To/References), prefixes the subject with 'Re:', quotes the original message and appends the account signature (see include_signature). The draft appears in the Drafts folder, ready to review and send."),
 		mcp.WithString("account_id",
 			mcp.Description("Account to reply from"),
 			mcp.Required(),
@@ -37,6 +37,9 @@ func registerReplyDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.
 		),
 		mcp.WithString("attachments",
 			mcp.Description("JSON array of attachments: [{\"filename\":\"...\", \"content_base64\":\"...\", \"mime_type\":\"...\"}]"),
+		),
+		mcp.WithBoolean("include_signature",
+			mcp.Description("Append the account's email signature (from Apple Mail) to the reply. Default: true."),
 		),
 		mcp.WithString("drafts_mailbox",
 			mcp.Description("Drafts mailbox name. Defaults to the account's \\Drafts folder, falling back to 'Drafts'."),
@@ -68,31 +71,43 @@ func registerReplyDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError("body is required"), nil
 		}
 		replyAll := req.GetBool("reply_all", false)
+		includeSignature := req.GetBool("include_signature", true)
 
 		client, err := pool.Get(accountID)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 		}
 
-		original, err := imappool.FetchEmail(client, mailbox, uint32(uid), 0, imappool.BodyFormatAuto)
+		original, err := imappool.FetchEmail(client, mailbox, uint32(uid), 0, imappool.BodyFormatBoth)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("fetch original email failed: %v", err)), nil
 		}
+
+		sig, sigWarn := resolveSignature(acc, includeSignature)
+		parts := buildReplyParts(acc, original, body, replyAll, sig)
 
 		attachments, err := parseAttachments(req.GetString("attachments", ""))
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid attachments: %v", err)), nil
 		}
 
-		parts := buildReplyParts(acc, original, body, replyAll)
-		msg := smtpsender.BuildMessage(acc.Email, parts.to, parts.cc, parts.subject, parts.text, attachments,
-			map[string]string{
+		msg := smtpsender.BuildMessageMIME(smtpsender.Message{
+			From:        acc.Email,
+			To:          parts.to,
+			Cc:          parts.cc,
+			Subject:     parts.subject,
+			TextBody:    parts.text,
+			HTMLBody:    parts.html,
+			Inline:      inlineOf(sig),
+			Attachments: attachments,
+			ExtraHeaders: map[string]string{
 				"In-Reply-To": parts.inReplyTo,
 				"References":  parts.references,
-			})
+			},
+		})
 
-		// Drafts mailbox: explicit override, then the \Drafts special-use
-		// folder, then the conventional "Drafts" name.
+		// Resolve the Drafts mailbox: explicit override, then \Drafts special-use,
+		// then the conventional "Drafts" name.
 		draftsMailbox := req.GetString("drafts_mailbox", "")
 		if draftsMailbox == "" {
 			if detected, err := imappool.FindDraftsMailbox(client); err == nil {
@@ -106,6 +121,6 @@ func registerReplyDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError(fmt.Sprintf("save reply draft failed: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Reply draft saved to %s (in reply to %s).", draftsMailbox, original.From)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Reply draft saved to %s (in reply to %s).%s", draftsMailbox, original.From, sigWarn)), nil
 	})
 }

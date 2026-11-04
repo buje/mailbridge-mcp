@@ -39,6 +39,9 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 		mcp.WithString("attachments",
 			mcp.Description("JSON array of attachments: [{\"filename\":\"...\", \"content_base64\":\"...\", \"mime_type\":\"...\"}]"),
 		),
+		mcp.WithBoolean("include_signature",
+			mcp.Description("Append the account's email signature (from Apple Mail) to the reply. Default: true."),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -66,20 +69,21 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError("body is required"), nil
 		}
 		replyAll := req.GetBool("reply_all", false)
+		includeSignature := req.GetBool("include_signature", true)
 
-		// Fetch original email to get headers
+		// Fetch original email (both renderings so we can quote in text and HTML).
 		client, err := pool.Get(accountID)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("IMAP connection failed: %v", err)), nil
 		}
 
-		original, err := imappool.FetchEmail(client, mailbox, uint32(uid), 0, imappool.BodyFormatAuto)
+		original, err := imappool.FetchEmail(client, mailbox, uint32(uid), 0, imappool.BodyFormatBoth)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("fetch original email failed: %v", err)), nil
 		}
 
-		// Recipients, threading headers and quoted original (shared with reply_draft).
-		parts := buildReplyParts(acc, original, body, replyAll)
+		sig, sigWarn := resolveSignature(acc, includeSignature)
+		parts := buildReplyParts(acc, original, body, replyAll, sig)
 
 		password, err := auth.GetPassword(acc.Auth)
 		if err != nil {
@@ -91,8 +95,23 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			return mcp.NewToolResultError(fmt.Sprintf("invalid attachments: %v", err)), nil
 		}
 
-		msg, err := smtpsender.SendReply(acc, password, parts.to, parts.cc, parts.subject, parts.text, parts.inReplyTo, parts.references, attachments)
-		if err != nil {
+		msg := smtpsender.BuildMessageMIME(smtpsender.Message{
+			From:        acc.Email,
+			To:          parts.to,
+			Cc:          parts.cc,
+			Subject:     parts.subject,
+			TextBody:    parts.text,
+			HTMLBody:    parts.html,
+			Inline:      inlineOf(sig),
+			Attachments: attachments,
+			ExtraHeaders: map[string]string{
+				"In-Reply-To": parts.inReplyTo,
+				"References":  parts.references,
+			},
+		})
+
+		recipients := append(append([]string{}, parts.to...), parts.cc...)
+		if _, err := smtpsender.SendRaw(acc, password, recipients, msg); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("reply failed: %v", err)), nil
 		}
 
@@ -101,7 +120,7 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			imappool.AppendMessage(client, sentMailbox, []goimap.Flag{goimap.FlagSeen}, msg)
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Reply sent successfully from %s to %s.", acc.Email, original.From)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Reply sent successfully from %s to %s.%s", acc.Email, original.From, sigWarn)), nil
 	})
 }
 

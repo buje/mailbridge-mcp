@@ -44,6 +44,9 @@ func registerSendEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 		mcp.WithString("attachments",
 			mcp.Description("JSON array of attachments: [{\"filename\":\"...\", \"content_base64\":\"...\", \"mime_type\":\"...\"}]"),
 		),
+		mcp.WithBoolean("include_signature",
+			mcp.Description("Append the account's email signature (from Apple Mail) to the email. Default: true."),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -77,6 +80,7 @@ func registerSendEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 		to := splitAndTrim(toStr)
 		cc := splitAndTrim(req.GetString("cc", ""))
 		bcc := splitAndTrim(req.GetString("bcc", ""))
+		includeSignature := req.GetBool("include_signature", true)
 
 		attachments, err := parseAttachments(req.GetString("attachments", ""))
 		if err != nil {
@@ -88,8 +92,22 @@ func registerSendEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 			return mcp.NewToolResultError(fmt.Sprintf("get password for %s: %v", acc.Email, err)), nil
 		}
 
-		msg, err := smtpsender.Send(acc, password, to, cc, bcc, subject, body, attachments)
-		if err != nil {
+		sig, sigWarn := resolveSignature(acc, includeSignature)
+		textBody, htmlBody := composeBody(body, sig)
+
+		msg := smtpsender.BuildMessageMIME(smtpsender.Message{
+			From:        acc.Email,
+			To:          to,
+			Cc:          cc,
+			Subject:     subject,
+			TextBody:    textBody,
+			HTMLBody:    htmlBody,
+			Inline:      inlineOf(sig),
+			Attachments: attachments,
+		})
+
+		recipients := append(append(append([]string{}, to...), cc...), bcc...)
+		if _, err := smtpsender.SendRaw(acc, password, recipients, msg); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("send failed: %v", err)), nil
 		}
 
@@ -100,7 +118,7 @@ func registerSendEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 			}
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Email sent successfully from %s to %s.", acc.Email, toStr)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Email sent successfully from %s to %s.%s", acc.Email, toStr, sigWarn)), nil
 	})
 }
 

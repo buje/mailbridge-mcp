@@ -10,6 +10,7 @@ make install      # Build + copy to /usr/local/bin + codesign (required for Clau
 make clean        # Remove local binary
 ./mailbridge-mcp setup   # Interactive config: add/update an account
 ./mailbridge-mcp serve   # Start MCP stdio server (used by Claude/Cursor)
+./mailbridge-mcp signature [account_id]   # Import/replace an account signature from Apple Mail
 ```
 
 **Critical:** After any code change, run `make install` — Claude Code loads the binary from `/usr/local/bin/mailbridge-mcp`, not from the repo. The Makefile also runs `codesign --force --sign -` on the installed binary (required on macOS to avoid Gatekeeper prompts).
@@ -37,6 +38,7 @@ type Account struct {
     IMAP  IMAPConfig  // Host, Port, TLS
     SMTP  SMTPConfig  // Host, Port, StartTLS, TLS
     Auth  AuthConfig  // Type (keychain|env), KeychainService, KeychainAccount, EnvVariable
+    Signature SignatureConfig // File: imported signature, absolute or relative to ~/.config/mailbridge
 }
 type Defaults struct {
     MaxFetch       int  // default 50
@@ -50,7 +52,7 @@ type Defaults struct {
 ## Architecture
 
 ```
-cmd/mailbridge-mcp/main.go     → entry point: "serve" or "setup" subcommands
+cmd/mailbridge-mcp/main.go     → entry point: "serve", "setup" and "signature" subcommands
 internal/config/config.go      → config loading/saving, types, Account() lookup
 internal/auth/keychain.go      → GetPassword() (keychain or env), SetPassword()
 internal/imap/client.go        → Pool: one IMAP connection per account, lazy connect with NOOP health check
@@ -59,7 +61,9 @@ internal/imap/fetch.go         → FetchEmail(), ParsedEmail, MIME body parsing,
 internal/imap/operations.go    → MoveEmail, MarkEmail, DeleteEmail, CopyEmail, ListMailboxes,
                                   CreateMailbox, DeleteMailbox, RenameMailbox, AppendMessage,
                                   FindSentMailbox, MailboxStatus
-internal/smtp/sender.go        → Send(), SendReply(), BuildMessage() — RFC 5322 compliant MIME construction
+internal/smtp/sender.go        → Send(), SendReply(), SendRaw(), BuildMessage(), BuildMessageMIME() — RFC 5322 MIME construction
+internal/signature/signature.go → Resolve() at runtime (reads the imported copy only); setup-time Apple Mail
+                                  import: DiscoverAppleMail(), SuggestForEmail(), Import()
 internal/tools/registry.go     → RegisterAll() calls each register* function
 internal/tools/*.go            → One file per MCP tool, each with a registerXxx() function
 ```
@@ -159,6 +163,7 @@ Shared helper: `splitAndTrim()` in `send_email.go` — splits comma-separated st
 - **`extractEmail(addr)`**: Uses `net/mail.ParseAddress()` to strip display names. **Always use before `RCPT TO`** — SMTP only accepts bare addresses. Has a manual angle-bracket fallback.
 - **`Send()` / `SendReply()`**: Build message → send via TLS or StartTLS → return raw message bytes for IMAP Sent copy. Both take an attachments slice (`send_email`, `reply_email`, `save_draft` expose it as a JSON array param: `filename`, `content_base64`, `mime_type`).
 - **`SendRaw()`**: sends an already-built MIME message as-is. Used by `send_draft`, which fetches the draft with `FetchRawBody()` so attachments and structure survive the round-trip.
+- **`BuildMessageMIME(Message)`**: text only → `text/plain`; + attachments → `multipart/mixed`; + HTML → `multipart/alternative`; HTML + `Inline` images → `multipart/related` inside the alternative. `BuildMessage()` is a thin text-only wrapper kept for existing callers.
 - **`BuildMessage()`**: RFC 5322 compliant MIME message with Date, From, To, Cc, Message-ID (crypto-random hex), Subject (RFC 2047 Q-encoding for non-ASCII), MIME-Version, Content-Type, Content-Transfer-Encoding (quoted-printable for non-ASCII body)
 - Two send paths: `sendStartTLS()` (port 587) and `sendTLS()` (direct TLS, port 465)
 - Auth: PLAIN auth with `smtp.PlainAuth`
@@ -176,10 +181,17 @@ Shared helper: `splitAndTrim()` in `send_email.go` — splits comma-separated st
 - Reply All: adds original To/Cc recipients who aren't the sender (uses `isSameEmail()` to compare)
 - `isSameEmail()`: compares potentially formatted address against plain email, case-insensitive
 
+## Signatures (`internal/signature`)
+
+- **Runtime:** `signature.Resolve(acc.Signature)` reads only the copy referenced by `signature.file` (`.mailsignature` MIME entity, `.html` or `.txt`). Never touches `~/Library`.
+- **Tools:** `send_email`, `reply_email`, `reply_draft`, `save_draft` take `include_signature` (default true). `resolveSignature()` (`reply_common.go`) is best-effort: errors become a warning appended to the tool result, never a failure. `composeBody()` builds text + HTML for new messages; `buildReplyParts()` places the signature between the reply and the quote.
+- **Import (setup / `signature` command only):** Mail's local store is found by probing `~/Library/Mail/V<n>/MailData/Signatures` directly (macOS forbids listing `~/Library/Mail` but allows reading `Signatures`). If it is denied → `ErrMailAccessDenied`, no fallback on iCloud copies (stale). Among indexed stores, the one with `AccountsMap.plist` wins.
+- **Apple formats:** `.mailsignature` = MIME entity (single `text/html`, often quoted-printable, or `multipart/related` with inline images) parsed with go-message. `AllSignatures.plist` (UUID → name) filters orphan files; `AccountsMap.plist` (account URL → signature UUIDs) drives `SuggestForEmail()`. Binary plists are converted with `plutil`. `<object type="application/x-apple-msg-attachment" data="cid:…">` is rewritten to `<img>`.
+
 ## Gotchas
 
 - **SMTP addresses:** IMAP can return display names like `'Edouard' <edouard@squirrel.fr>`. `extractEmail()` in `internal/smtp/sender.go` strips these before `RCPT TO`. Always use it when passing addresses to SMTP.
-- **Thin test coverage:** only `internal/imap/fetch_test.go`, `internal/imap/attachment_test.go`, `internal/smtp/sender_test.go` and `internal/tools/reply_common_test.go` exist (MIME walk, HTML→text, link extraction, body formats, attachment extraction/saving, multipart boundaries, reply threading). Everything else is untested — `go test ./...` passing says little.
+- **Thin test coverage:** only `internal/imap/fetch_test.go`, `internal/imap/attachment_test.go`, `internal/smtp/sender_test.go`, `internal/tools/reply_common_test.go` and `internal/signature/*_test.go` exist (MIME walk, HTML→text, link extraction, body formats, attachment extraction/saving, multipart boundaries, reply threading, signature parsing/discovery/import). Everything else is untested — `go test ./...` passing says little.
 - **macOS-only:** Keychain auth via `go-keyring` — won't work on Linux without D-Bus/Secret Service. `env` auth type is available as alternative.
 - **Config path:** `~/.config/mailbridge/accounts.json` (JSON, not YAML). When in doubt, trust `config.go:73` over any doc.
 - **IMAP pool:** Connections are pooled lazily. Must call `defer pool.Close()` after `NewPool()`.

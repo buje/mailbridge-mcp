@@ -29,12 +29,13 @@ Si `/mcp` échoue avec "Failed to reconnect" :
 
 ## Architecture
 
-- `cmd/mailbridge-mcp/` — Point d'entrée, sous-commandes `serve` (MCP stdio) et `setup` (config interactive)
+- `cmd/mailbridge-mcp/` — Point d'entrée, sous-commandes `serve` (MCP stdio), `setup` (config interactive) et `signature` (import de la signature Apple Mail d'un compte)
 - `internal/imap/` — Client IMAP (pool de connexions)
 - `internal/smtp/` — Envoi SMTP (StartTLS/TLS)
 - `internal/tools/` — Outils MCP (search, read, reply, send, etc.)
 - `internal/config/` — Config JSON (`~/.config/mailbridge/accounts.json`), voir `config.go:73`
 - `internal/auth/` — Mots de passe via macOS Keychain
+- `internal/signature/` — Signatures : import ponctuel depuis Apple Mail (setup), lecture de la copie `~/.config/mailbridge/signatures/` au runtime
 
 ## Config MCP Claude Code
 
@@ -66,4 +67,4 @@ Les adresses email récupérées via IMAP peuvent contenir des display names (ex
 - Go standard library, pas de frameworks HTTP
 - `net/mail.ParseAddress()` pour parser les adresses email
 - Credentials via macOS Keychain (jamais en dur)
-- Tests : `go test ./...` (couverture actuelle : parsing MIME/HTML dans `internal/imap`)
+- Tests : `go test ./...` (couverture : parsing MIME/HTML dans `internal/imap`, construction MIME dans `internal/smtp`, réponses dans `internal/tools`, signatures dans `internal/signature`)

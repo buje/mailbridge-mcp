@@ -13,12 +13,23 @@ type Config struct {
 }
 
 type Account struct {
-	ID    string     `json:"id"`
-	Label string     `json:"label"`
-	Email string     `json:"email"`
-	IMAP  IMAPConfig `json:"imap"`
-	SMTP  SMTPConfig `json:"smtp"`
-	Auth  AuthConfig `json:"auth"`
+	ID        string          `json:"id"`
+	Label     string          `json:"label"`
+	Email     string          `json:"email"`
+	IMAP      IMAPConfig      `json:"imap"`
+	SMTP      SMTPConfig      `json:"smtp"`
+	Auth      AuthConfig      `json:"auth"`
+	Signature SignatureConfig `json:"signature"`
+}
+
+// SignatureConfig points to the account's email signature. File is a path to a
+// signature file (an Apple Mail ".mailsignature", or a ".html"/".txt" file),
+// absolute or relative to the mailbridge config directory. Signatures imported
+// from Apple Mail at setup are copied under "signatures/" and referenced here,
+// so the running server stays self-contained and never reads ~/Library.
+// An empty config means "no signature".
+type SignatureConfig struct {
+	File string `json:"file,omitempty"`
 }
 
 type IMAPConfig struct {

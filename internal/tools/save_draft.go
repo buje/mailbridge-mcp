@@ -40,6 +40,9 @@ func registerSaveDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 		mcp.WithString("mailbox",
 			mcp.Description("Drafts mailbox name (default: 'Drafts')"),
 		),
+		mcp.WithBoolean("include_signature",
+			mcp.Description("Append the account's email signature (from Apple Mail) to the draft. Default: true."),
+		),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(false),
 		mcp.WithIdempotentHintAnnotation(false),
@@ -69,13 +72,26 @@ func registerSaveDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 		to := splitAndTrim(req.GetString("to", ""))
 		cc := splitAndTrim(req.GetString("cc", ""))
 		draftsMailbox := req.GetString("mailbox", "Drafts")
+		includeSignature := req.GetBool("include_signature", true)
 
 		attachments, err := parseAttachments(req.GetString("attachments", ""))
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("invalid attachments: %v", err)), nil
 		}
 
-		msg := smtpsender.BuildMessage(acc.Email, to, cc, subject, body, attachments, nil)
+		sig, sigWarn := resolveSignature(acc, includeSignature)
+		textBody, htmlBody := composeBody(body, sig)
+
+		msg := smtpsender.BuildMessageMIME(smtpsender.Message{
+			From:        acc.Email,
+			To:          to,
+			Cc:          cc,
+			Subject:     subject,
+			TextBody:    textBody,
+			HTMLBody:    htmlBody,
+			Inline:      inlineOf(sig),
+			Attachments: attachments,
+		})
 
 		client, err := pool.Get(accountID)
 		if err != nil {
@@ -90,6 +106,6 @@ func registerSaveDraft(s *server.MCPServer, cfg *config.Config, pool *imappool.P
 		if recipients == "" {
 			recipients = "(no recipients yet)"
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("Draft saved to %s: \"%s\" → %s", draftsMailbox, subject, recipients)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("Draft saved to %s: \"%s\" → %s%s", draftsMailbox, subject, recipients, sigWarn)), nil
 	})
 }
