@@ -107,7 +107,9 @@ Key conventions:
 - Always check `cfg.Account(accountID) == nil` before using the account
 - **IMAP tools** use `pool.Get(accountID)` to get client; **SMTP tools** use `auth.GetPassword(acc.Auth)` then `smtpsender.Send()/SendRaw()`
 - `reply_email` saves a threaded draft by default (`BuildReply()` + `AppendMessage()` with `\Draft`); it sends only with `send: true`
-- Drafts folder: `imappool.FindDraftsMailbox()` (`\Drafts` special-use, then Drafts/Brouillons) when no mailbox is passed
+- Drafts/Sent folder: `imappool.FindDraftsMailbox()` / `FindSentMailbox()` when no mailbox is passed. Candidates are the special-use folder and the known names; the least nested one wins (`INBOX.Drafts` over a duplicate `INBOX.INBOX.Drafts`), then special-use, then name (`pickMailbox()`)
+- Drafts carry Apple Mail's draft headers (`smtpsender.MarkDraft()`: `X-Uniform-Type-Identifier: com.apple.mail-draft` + UUID), otherwise Mail sends a copy and leaves the draft in Drafts; `send_draft` removes them before sending (`StripDraftHeaders()`)
+- Reply quote: the original HTML body is quoted as is (`Quote.HTML`, without scripts and cid: images); `read_email` keeps a single version of a multipart/alternative
 - Tools that send email (send_email, reply_email with send=true, send_draft) also copy the sent message to the Sent folder via `imappool.FindSentMailbox()` + `imappool.AppendMessage()`
 - Error messages include the operation name, UID, mailbox, or account for debugging
 
