@@ -189,3 +189,34 @@ func TestLongASCIILinesAreEncoded(t *testing.T) {
 		t.Errorf("round trip lost content")
 	}
 }
+
+func TestQuoteKeepsOriginalHTML(t *testing.T) {
+	orig := `<html><head><style>.x{}</style></head><body><p>Bonjour</p>` +
+		`<table><tr><td style="height:20px">Thomas</td></tr></table>` +
+		`<img src="cid:old-logo@x" alt="logo"><img src="https://x.fr/a.png"><script>alert(1)</script></body></html>`
+	body := Body{Text: "Réponse", Quote: &Quote{Header: "On Mon, Bob wrote:", Text: "Bonjour\nThomas", HTML: orig}}
+
+	leaves := parse(t, BuildMessage("me@squirrel.fr", []string{"bob@x.fr"}, nil, "Re: X", body, nil, nil))
+	if got := strings.Join(paths(leaves), ","); got != "multipart/alternative>text/plain,multipart/alternative>text/html" {
+		t.Fatalf("structure: %s", got)
+	}
+	plain, htm := leaves[0].body, leaves[1].body
+	if !strings.Contains(plain, "> Bonjour\n> Thomas") {
+		t.Errorf("plain quote:\n%s", plain)
+	}
+	for _, want := range []string{`<table><tr><td style="height:20px">Thomas</td></tr></table>`, `src="https://x.fr/a.png"`} {
+		if !strings.Contains(htm, want) {
+			t.Errorf("quoted html lost %q:\n%s", want, htm)
+		}
+	}
+	for _, bad := range []string{"cid:old-logo", "<script", "<style>"} {
+		if strings.Contains(htm, bad) {
+			t.Errorf("quoted html keeps %q:\n%s", bad, htm)
+		}
+	}
+	// The quote container carries no style: the quoted HTML does not inherit
+	// our font size and line height.
+	if !strings.Contains(htm, "<div class=\"gmail_quote\">\n") {
+		t.Errorf("quote container is styled:\n%s", htm)
+	}
+}

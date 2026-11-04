@@ -155,20 +155,13 @@ func (p *ParsedEmail) walk(e *message.Entity, text, htm *strings.Builder, depth 
 
 	// Container: recurse into each child part.
 	if mr := e.MultipartReader(); mr != nil {
-		for {
-			part, err := mr.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				if message.IsUnknownCharset(err) && part != nil {
-					p.walk(part, text, htm, depth+1)
-					continue
-				}
-				break
-			}
-			p.walk(part, text, htm, depth+1)
+		if mediaType == "multipart/alternative" {
+			p.walkAlternative(mr, text, htm, depth)
+			return
 		}
+		eachPart(mr, func(part *message.Entity) {
+			p.walk(part, text, htm, depth+1)
+		})
 		return
 	}
 
@@ -219,6 +212,50 @@ func (p *ParsedEmail) walk(e *message.Entity, text, htm *strings.Builder, depth 
 	default:
 		appendSection(text, string(data))
 	}
+}
+
+// eachPart calls fn for every child of a multipart entity, skipping past
+// parts with an unknown charset (still usable) and stopping on other errors.
+func eachPart(mr message.MultipartReader, fn func(*message.Entity)) {
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			return
+		}
+		if err != nil {
+			if message.IsUnknownCharset(err) && part != nil {
+				fn(part)
+				continue
+			}
+			return
+		}
+		fn(part)
+	}
+}
+
+// walkAlternative keeps one version of a multipart/alternative: the children
+// are the same content in different formats (RFC 2046 §5.1.4), so collecting
+// all of them would repeat the message (text/plain, then the HTML converted to
+// text). The text comes from the text/plain child, or from the HTML when there
+// is none; the HTML from the last HTML child, the richest one.
+func (p *ParsedEmail) walkAlternative(mr message.MultipartReader, text, htm *strings.Builder, depth int) {
+	var plain, fromHTML, richHTML string
+	eachPart(mr, func(part *message.Entity) {
+		var t, h strings.Builder
+		p.walk(part, &t, &h, depth+1)
+		switch {
+		case h.Len() > 0:
+			richHTML = h.String()
+			fromHTML = t.String()
+		case t.Len() > 0 && plain == "":
+			plain = t.String()
+		}
+	})
+	if plain == "" {
+		plain = fromHTML
+	}
+	appendSection(text, plain)
+	appendSection(htm, richHTML)
 }
 
 // render picks the body representation matching the requested format.

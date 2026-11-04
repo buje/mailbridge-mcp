@@ -133,6 +133,7 @@ func registerReplyEmail(s *server.MCPServer, cfg *config.Config, pool *imappool.
 			Quote: &smtpsender.Quote{
 				Header: fmt.Sprintf("On %s, %s wrote:", original.Date, original.From),
 				Text:   original.Body,
+				HTML:   original.HTMLBody,
 			},
 		}
 		msg := smtpsender.BuildReply(acc.Email, to, cc, subject, replyBody, inReplyTo, references, attachments)
